@@ -1,0 +1,726 @@
+================================================================================
+                    DARKWEB SCRAPER - COMPREHENSIVE USAGE GUIDE
+================================================================================
+
+This guide provides step-by-step instructions for setting up and using the
+Darkweb Scraper tool to extract product listings and HTML from dark web
+marketplaces through Tor.
+
+================================================================================
+                              TABLE OF CONTENTS
+================================================================================
+
+1. Overview
+2. System Requirements
+3. Installation Steps
+   3.1. Install Tor
+   3.2. Install Privoxy
+   3.3. Install Firefox
+   3.4. Install Python Dependencies
+4. Configuration
+   4.1. Configure Tor
+   4.2. Configure Privoxy
+   4.3. Verify Configuration
+5. Using the Scraper
+   5.1. Basic Usage
+   5.2. Category-Specific Scraping
+   5.3. Keyword Search Mode
+   5.4. Command-Line Options
+6. Output Files
+7. Troubleshooting
+8. Best Practices and Legal Disclaimer
+
+================================================================================
+                              1. OVERVIEW
+================================================================================
+
+The Darkweb Scraper is a Python-based tool designed to scrape product listings
+from dark web marketplaces accessible via Tor (.onion domains). It features:
+
+- Automated CAPTCHA handling (manual solving required)
+- Category-specific endpoint targeting
+- Product metadata extraction (title, price, listing URL)
+- Full HTML archiving for each product listing
+- Keyword-based page discovery
+- Proxy routing through Tor SOCKS5 or HTTP (Privoxy)
+- Session persistence and checkpoint recovery
+
+================================================================================
+                          2. SYSTEM REQUIREMENTS
+================================================================================
+
+Operating System:
+  - macOS (tested)
+  - Linux (compatible)
+  - Windows (with WSL or native Tor/Privoxy)
+
+Software Requirements:
+  - Python 3.7 or higher
+  - Tor (anonymity network)
+  - Privoxy (HTTP proxy)
+  - Firefox (web browser)
+  - geckodriver (Selenium WebDriver for Firefox)
+
+Network:
+  - Internet connection
+  - Ability to access Tor network (not blocked by ISP/firewall)
+
+================================================================================
+                          3. INSTALLATION STEPS
+================================================================================
+
+3.1. INSTALL TOR
+----------------
+
+macOS (using Homebrew):
+  $ brew install tor
+
+Ubuntu/Debian Linux:
+  $ sudo apt update
+  $ sudo apt install tor
+
+Windows:
+  Download Tor Expert Bundle from https://www.torproject.org/download/tor/
+  Extract to a directory and add to PATH.
+
+Verify installation:
+  $ tor --version
+  Tor version 0.x.x.x
+
+
+3.2. INSTALL PRIVOXY
+--------------------
+
+macOS (using Homebrew):
+  $ brew install privoxy
+
+Ubuntu/Debian Linux:
+  $ sudo apt update
+  $ sudo apt install privoxy
+
+Windows:
+  Download from https://www.privoxy.org/
+  Install using the Windows installer.
+
+Verify installation:
+  $ privoxy --version
+  Privoxy version 3.x.x
+
+
+3.3. INSTALL FIREFOX
+--------------------
+
+macOS:
+  Download from https://www.mozilla.org/firefox/
+  Install the .dmg file to /Applications/
+
+Ubuntu/Debian Linux:
+  $ sudo apt update
+  $ sudo apt install firefox
+
+Windows:
+  Download from https://www.mozilla.org/firefox/
+  Run the installer.
+
+Verify installation:
+  $ firefox --version
+  Mozilla Firefox 120.x
+
+Install geckodriver (required for Selenium):
+  macOS:
+    $ brew install geckodriver
+
+  Linux:
+    $ sudo apt install firefox-geckodriver
+    # OR download from https://github.com/mozilla/geckodriver/releases
+
+  Windows:
+    Download from https://github.com/mozilla/geckodriver/releases
+    Extract and add to PATH.
+
+
+3.4. INSTALL PYTHON DEPENDENCIES
+---------------------------------
+
+1. Clone the repository:
+   $ git clone https://github.com/AdilKhan000/Darkweb_Scraper.git
+   $ cd Darkweb_Scraper
+
+2. Create a virtual environment (recommended):
+   $ python3 -m venv myenv
+   $ source myenv/bin/activate  # On Windows: myenv\Scripts\activate
+
+3. Install required packages:
+   $ pip install -r requirements.txt
+
+   This installs:
+   - selenium (browser automation)
+   - requests (HTTP client)
+   - beautifulsoup4 (HTML parsing)
+   - termcolor (colored terminal output)
+   - PySocks (SOCKS proxy support)
+
+================================================================================
+                            4. CONFIGURATION
+================================================================================
+
+4.1. CONFIGURE TOR
+------------------
+
+Tor must be configured to listen on port 9050 for SOCKS5 connections.
+
+1. Locate the Tor configuration file:
+
+   macOS (Homebrew):
+     /usr/local/etc/tor/torrc
+     # OR
+     /opt/homebrew/etc/tor/torrc
+
+   Linux:
+     /etc/tor/torrc
+
+   Windows:
+     C:\path\to\Tor\torrc
+
+2. Edit the torrc file:
+   $ sudo nano /usr/local/etc/tor/torrc  # Adjust path as needed
+
+3. Add or uncomment these lines:
+
+   SocksPort 9050
+   ControlPort 9051
+
+   Optional (for better anonymity):
+   CookieAuthentication 1
+   DataDirectory /var/lib/tor
+
+4. Save and exit (Ctrl+O, Enter, Ctrl+X in nano).
+
+5. Start/Restart Tor:
+
+   macOS (Homebrew):
+     $ brew services start tor
+     # OR
+     $ brew services restart tor
+
+   Linux (systemd):
+     $ sudo systemctl start tor
+     $ sudo systemctl enable tor  # Start on boot
+
+   Linux (non-systemd):
+     $ sudo service tor start
+
+   Windows:
+     Run tor.exe from the command line or as a service.
+
+6. Verify Tor is running:
+   $ netstat -an | grep 9050
+   # Should show a listening socket on 127.0.0.1:9050
+
+
+4.2. CONFIGURE PRIVOXY
+----------------------
+
+Privoxy acts as an HTTP proxy that forwards traffic to Tor's SOCKS5 proxy.
+
+1. Locate the Privoxy configuration file:
+
+   macOS (Homebrew):
+     /usr/local/etc/privoxy/config
+     # OR
+     /opt/homebrew/etc/privoxy/config
+
+   Linux:
+     /etc/privoxy/config
+
+   Windows:
+     C:\Program Files\Privoxy\config.txt
+
+2. Edit the config file:
+   $ sudo nano /usr/local/etc/privoxy/config  # Adjust path as needed
+
+3. Find the line that starts with "forward-socks5" or add this line:
+
+   forward-socks5t / 127.0.0.1:9050 .
+
+   IMPORTANT:
+   - The "t" in "forward-socks5t" enables Tor DNS resolution
+   - The "." at the end is required (parent proxy)
+   - Make sure there are NO other conflicting forward directives
+
+4. Optional: Set the listen address (default is 127.0.0.1:8118):
+   listen-address 127.0.0.1:8118
+
+5. Save and exit.
+
+6. Start/Restart Privoxy:
+
+   macOS (Homebrew):
+     $ brew services start privoxy
+     # OR
+     $ brew services restart privoxy
+
+   Linux (systemd):
+     $ sudo systemctl start privoxy
+     $ sudo systemctl enable privoxy
+
+   Linux (non-systemd):
+     $ sudo service privoxy start
+
+   Windows:
+     Start Privoxy service from Services panel or run privoxy.exe
+
+7. Verify Privoxy is running:
+   $ netstat -an | grep 8118
+   # Should show a listening socket on 127.0.0.1:8118
+
+
+4.3. VERIFY CONFIGURATION
+-------------------------
+
+Test that Tor and Privoxy are working together:
+
+1. Test SOCKS5 connection directly:
+   $ curl --socks5-hostname 127.0.0.1:9050 https://check.torproject.org
+   # Should return HTML indicating you're using Tor
+
+2. Test HTTP proxy (Privoxy → Tor):
+   $ curl --proxy 127.0.0.1:8118 https://check.torproject.org
+   # Should return HTML indicating you're using Tor
+
+3. Check your Tor IP:
+   $ curl --socks5-hostname 127.0.0.1:9050 https://api.ipify.org
+   # Should return a Tor exit node IP (not your real IP)
+
+If tests fail, review logs:
+- Tor logs: Check terminal output or /var/log/tor/
+- Privoxy logs: Usually in /var/log/privoxy/ or config directory
+
+================================================================================
+                          5. USING THE SCRAPER
+================================================================================
+
+5.1. BASIC USAGE
+----------------
+
+The scraper requires manual CAPTCHA solving on first run. Basic command:
+
+$ python scraper.py --socks --socks-port 9050 --manual
+
+Steps:
+1. The script opens Firefox through Tor
+2. Waits 60 seconds for session establishment
+3. Prompts: "Manual mode: please solve any CAPTCHA..."
+4. Solve the CAPTCHA in the browser window
+5. Press Enter in the terminal to continue
+6. The scraper extracts cookies and begins crawling
+
+Output:
+- products.json: Product metadata (title, price, listing URL)
+- products_html.json: Full HTML for each product listing
+- scraping_checkpoint.pkl: Resume point for interrupted scrapes
+
+
+5.2. CATEGORY-SPECIFIC SCRAPING
+--------------------------------
+
+To scrape only specific marketplace categories (endpoints):
+
+$ python scraper.py --socks --socks-port 9050 --manual \
+  --category-endpoints /product-category/sex-aids/ /product-category/buy-steroids/
+
+What it does:
+- Restricts crawling to ONLY the specified endpoint paths
+- Discovers products on those category pages
+- Fetches and saves full HTML for each product listing
+- Saves discovered category URLs to pages_url.json
+
+Example with more endpoints:
+$ python scraper.py --socks --socks-port 9050 --manual \
+  --category-endpoints \
+    /product-category/research-chemicals/ \
+    /product-category/buy-pain-meds/ \
+    /product-category/cocaine/
+
+Notes:
+- Endpoints must match the exact URL paths on the target site
+- Use trailing slashes if the site uses them
+- The scraper will NOT follow links outside these endpoints
+
+
+5.3. KEYWORD SEARCH MODE
+-------------------------
+
+Find pages containing specific keywords:
+
+$ python scraper.py --socks --socks-port 9050 --manual \
+  --search-keywords "viagra" "buy steroids"
+
+What it does:
+- Crawls the entire site looking for keywords
+- Saves matching URLs to pages_url.json
+- Does NOT scrape products (use regular mode after)
+
+Use case:
+1. Run keyword search to find relevant pages
+2. Review pages_url.json
+3. Extract endpoint paths
+4. Re-run with --category-endpoints for targeted scraping
+
+
+5.4. COMMAND-LINE OPTIONS
+--------------------------
+
+Required Options:
+--socks
+  Use Tor SOCKS5 proxy (recommended for .onion sites)
+
+--socks-port PORT
+  Tor SOCKS port (default: 9050)
+  Change to 9150 if using Tor Browser Bundle
+
+--manual
+  Enable manual CAPTCHA solving mode
+  Required for first run on most sites
+
+Optional Options:
+--category-endpoints ENDPOINT [ENDPOINT ...]
+  Restrict scraping to specific URL paths
+  Example: --category-endpoints /product-category/drugs/
+
+--search-keywords KEYWORD [KEYWORD ...]
+  Crawl site for pages containing keywords
+  Saves results to pages_url.json
+
+--page-timeout SECONDS
+  Selenium page load timeout (default: 300)
+  Increase for slow Tor connections
+
+--save-pages
+  Save full page HTML+metadata to scraped_pages.json
+  Useful for debugging or archival
+
+--selenium-fallback
+  Start a second Selenium driver for pages requests can't fetch
+  Slower but more reliable
+
+--tor-binary PATH
+  Path to custom Firefox binary (e.g., Tor Browser)
+  Example: --tor-binary "/Applications/Tor Browser.app/Contents/MacOS/firefox"
+
+--tor-profile PATH
+  Path to Tor Browser profile directory
+  Preserves Tor Browser settings/extensions
+
+--disable-js
+  Disable JavaScript in the browser
+  May break some sites but improves anonymity
+
+Full Example:
+$ python scraper.py \
+  --socks \
+  --socks-port 9050 \
+  --manual \
+  --category-endpoints /product-category/buy-steroids/ \
+  --save-pages \
+  --page-timeout 600
+
+
+5.5. RESUMING A SCRAPE
+----------------------
+
+If the scraper is interrupted:
+
+1. The checkpoint file (scraping_checkpoint.pkl) saves progress
+2. Simply re-run the same command
+3. The scraper resumes from the last saved URL
+
+To start fresh:
+$ rm scraping_checkpoint.pkl
+$ python scraper.py --socks --socks-port 9050 --manual
+
+To clear all outputs:
+$ rm products.json products_html.json pages_url.json scraped_pages.json scraping_checkpoint.pkl
+
+
+5.6. DUMPING COLLECTED DATA
+----------------------------
+
+View scraped products:
+$ python scraper.py --dump
+
+This prints products.json contents to stdout (formatted JSON).
+
+Use jq for better formatting:
+$ python scraper.py --dump | jq .
+
+Count products scraped:
+$ python scraper.py --dump | jq length
+
+================================================================================
+                            6. OUTPUT FILES
+================================================================================
+
+products.json
+-------------
+Contains product metadata extracted from listing pages.
+
+Structure:
+[
+  {
+    "market": "marketplace.onion",
+    "category page": "http://marketplace.onion/product-category/drugs/",
+    "listing url": "http://marketplace.onion/shop/product-name/",
+    "title": "Product Title",
+    "price": "$100"
+  },
+  ...
+]
+
+
+products_html.json
+------------------
+Contains full HTML for each product listing page.
+
+Structure:
+[
+  {
+    "market": "marketplace.onion",
+    "category page": "http://marketplace.onion/product-category/drugs/",
+    "listing url": "http://marketplace.onion/shop/product-name/",
+    "fetched_at": 1697500000,
+    "html": "<html>...</html>"
+  },
+  ...
+]
+
+Use cases:
+- Offline analysis of product pages
+- Re-parsing HTML with different selectors
+- Legal evidence collection
+
+
+pages_url.json
+--------------
+Stores discovered URLs (used by keyword search and endpoint modes).
+
+Structure:
+[
+  "http://marketplace.onion/product-category/sex-aids/",
+  "http://marketplace.onion/product-category/buy-steroids/",
+  ...
+]
+
+
+scraped_pages.json
+------------------
+Created when --save-pages is used. Archives all fetched pages.
+
+Structure:
+[
+  {
+    "url": "http://marketplace.onion/page/1/",
+    "timestamp": 1697500000,
+    "html": "<html>...</html>"
+  },
+  ...
+]
+
+
+scraping_checkpoint.pkl
+-----------------------
+Binary pickle file storing the crawl queue. Do not edit manually.
+
+To inspect (advanced):
+$ python -c "import pickle; print(pickle.load(open('scraping_checkpoint.pkl','rb')))"
+
+================================================================================
+                          7. TROUBLESHOOTING
+================================================================================
+
+PROBLEM: "proxyConnectFailure" or "proxy refusing connections"
+SOLUTION:
+  - Verify Tor is running: netstat -an | grep 9050
+  - Restart Tor: brew services restart tor (macOS) or sudo systemctl restart tor (Linux)
+  - Check torrc has SocksPort 9050
+  - Try different port: --socks-port 9150 (Tor Browser default)
+
+PROBLEM: Firefox/geckodriver not found
+SOLUTION:
+  - Install Firefox: brew install firefox (macOS) or apt install firefox (Linux)
+  - Install geckodriver: brew install geckodriver
+  - Ensure geckodriver is in PATH: which geckodriver
+
+PROBLEM: "Failed to scrape [URL], status code: 403/503"
+SOLUTION:
+  - Site may have anti-scraping measures
+  - Increase delays: time.sleep() values in script
+  - Use --selenium-fallback for JavaScript-heavy sites
+  - Try different Tor circuit: sudo killall -HUP tor
+
+PROBLEM: CAPTCHA never appears / infinite loading
+SOLUTION:
+  - Increase --page-timeout (default 300s)
+  - Check site is accessible: curl --socks5-hostname 127.0.0.1:9050 http://site.onion
+  - Try using Tor Browser directly to verify site is up
+  - Some sites block Tor exit nodes
+
+PROBLEM: "No module named 'selenium'" or other import errors
+SOLUTION:
+  - Activate virtual environment: source myenv/bin/activate
+  - Reinstall dependencies: pip install -r requirements.txt
+  - Check Python version: python --version (needs 3.7+)
+
+PROBLEM: products.json or products_html.json not created
+SOLUTION:
+  - Verify products were found on category pages
+  - Check terminal output for errors
+  - Ensure selectors match site structure (may need code updates)
+  - Try running without --category-endpoints first
+
+PROBLEM: Scraper is very slow
+SOLUTION:
+  - Tor is inherently slower than clearnet
+  - Reduce --page-timeout if comfortable
+  - Use --disable-js if site allows
+  - Consider using HTTP proxy (Privoxy) instead of SOCKS5
+    Command: python scraper.py --manual (omit --socks)
+
+PROBLEM: "listing url" key errors in products.json
+SOLUTION:
+  - Script was updated to use "listing url" (with space)
+  - Old data may have "listing_url" (underscore)
+  - Clear old data: rm products.json products_html.json
+  - Re-run scraper
+
+PROBLEM: Tor connection works but Privoxy doesn't
+SOLUTION:
+  - Check Privoxy config: grep forward-socks5t /usr/local/etc/privoxy/config
+  - Should show: forward-socks5t / 127.0.0.1:9050 .
+  - Restart Privoxy: brew services restart privoxy
+  - Verify port 8118: netstat -an | grep 8118
+
+PROBLEM: Getting real IP instead of Tor IP
+SOLUTION:
+  - Privoxy forward rule may be incorrect
+  - Check for conflicting forward rules in Privoxy config
+  - Test: curl --proxy 127.0.0.1:8118 https://api.ipify.org
+  - Ensure no system-wide proxy settings conflict
+
+================================================================================
+                    8. BEST PRACTICES AND LEGAL DISCLAIMER
+================================================================================
+
+BEST PRACTICES
+--------------
+
+1. Respect Rate Limits
+   - The scraper includes random delays (5-15 seconds between pages)
+   - Do not modify delays to be too aggressive
+   - Consider running during off-peak hours
+
+2. Use CAPTCHA Solving Ethically
+   - Never automate CAPTCHA solving without permission
+   - Solve CAPTCHAs manually as intended
+   - Do not use third-party CAPTCHA-solving services
+
+3. Data Storage Security
+   - Output files may contain sensitive/illegal content
+   - Encrypt storage: FileVault (macOS), LUKS (Linux), BitLocker (Windows)
+   - Use secure deletion when disposing: shred (Linux) or secure empty trash
+
+4. Operational Security
+   - Always route through Tor when accessing .onion sites
+   - Consider running in a VM or dedicated machine
+   - Use Tails OS for maximum anonymity
+   - Clear browser history/cookies after use
+
+5. Network Security
+   - Ensure no DNS leaks: All DNS queries should go through Tor
+   - Disable WebRTC in Firefox: about:config → media.peerconnection.enabled = false
+   - Use VPN + Tor for additional layer (VPN → Tor → Site)
+
+6. Regular Updates
+   - Keep Tor updated: brew upgrade tor
+   - Update Python packages: pip install --upgrade -r requirements.txt
+   - Update Firefox and geckodriver regularly
+
+
+LEGAL DISCLAIMER
+----------------
+
+WARNING: This tool is provided for EDUCATIONAL and RESEARCH purposes only.
+
+The authors and contributors:
+- Do NOT endorse illegal activities of any kind
+- Are NOT responsible for how you use this tool
+- Are NOT liable for any damages, legal consequences, or harm resulting from use
+
+Before using this tool, understand that:
+
+1. Accessing dark web marketplaces may be illegal in your jurisdiction
+2. Scraping websites may violate their Terms of Service
+3. Possessing certain data (e.g., illegal drug listings) may be a crime
+4. Law enforcement monitors dark web activity
+
+5. You are SOLELY responsible for:
+   - Ensuring your use complies with all applicable laws
+   - Obtaining necessary permissions before scraping
+   - Understanding the legal implications in your country/region
+   - Any consequences resulting from your actions
+
+6. Legitimate Use Cases:
+   - Academic research with proper ethics approval
+   - Law enforcement investigations with legal authority
+   - Security research on test environments you own
+   - Monitoring your own marketplace listings
+
+7. Consult a lawyer if you are unsure about the legality of your intended use.
+
+By using this tool, you acknowledge:
+- You have read and understood this disclaimer
+- You accept full responsibility for your actions
+- You will use this tool legally and ethically
+- You will not hold the authors liable for any consequences
+
+
+RESPONSIBLE DISCLOSURE
+----------------------
+
+If you discover vulnerabilities in this tool that could be exploited:
+- Do NOT use them maliciously
+- Report to the repository maintainers via GitHub Issues (responsible disclosure)
+- Allow time for fixes before public disclosure
+
+
+ETHICAL RESEARCH GUIDELINES
+----------------------------
+
+If conducting research with this tool:
+1. Obtain IRB/ethics committee approval where required
+2. Minimize data collection to what's necessary
+3. Anonymize data and protect identities
+4. Securely store and properly dispose of sensitive data
+5. Consider the potential harm of your research
+6. Publish responsibly, avoiding detailed scraping techniques that enable abuse
+
+
+CONTACT AND SUPPORT
+-------------------
+
+GitHub Repository: https://github.com/AdilKhan000/Darkweb_Scraper
+Issues/Bug Reports: https://github.com/AdilKhan000/Darkweb_Scraper/issues
+
+For security-sensitive issues, contact repository owner directly.
+
+
+================================================================================
+                            END OF USAGE GUIDE
+================================================================================
+
+Last Updated: October 2025
+Version: 2.0
+
+Thank you for using the Darkweb Scraper responsibly and ethically.
+
+================================================================================

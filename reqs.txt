@@ -1,0 +1,5 @@
+selenium==4.9.0
+pymongo
+requests
+beautifulsoup4
+termcolor
