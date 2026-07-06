@@ -234,17 +234,40 @@ def extract_dread_post_links(html, base_url):
     return links
 
 
-def dread_block_check(html):
-    """Anti-bot detector for Dread (overrides the generic browser-fetch check).
+def extract_reddit_post_links(html, base_url):
+    """Extract conversation (post) URLs from the Reddit Tor mirror's search page.
 
-    Dread's normal logged-in pages contain the word "captcha" (login/report/registration
-    widgets), so the generic _looks_like_captcha would flag every good page and, in
-    --manual mode, loop forever asking the operator to "solve the CAPTCHA". Dread shows
-    no interstitial CAPTCHA during normal browsing, so we only treat a page as blocked
-    when it is genuinely empty/stub or its <title> is itself the challenge (a real
-    CAPTCHA/anti-DDoS interstitial titles itself that way). A bad fetch is otherwise
-    caught downstream: parse_count_dread returns None on a non-results page → the term
-    is retried next run rather than mis-saved.
+    Each search hit's title is `<a data-testid="post-title" href="/r/<sub>/comments/<id>/<slug>/">`.
+    We take those anchors, resolve them against `base_url`, drop any query/fragment,
+    and dedupe. Returns a list, mirroring extract_product_links' shape.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    links = []
+    seen = set()
+    for a in soup.select('a[data-testid="post-title"][href]'):
+        href = a.get("href")
+        if not href:
+            continue
+        full = urllib.parse.urljoin(base_url, href)
+        full = full.split("#")[0].split("?")[0]  # canonical post path only
+        if full and full not in seen:
+            seen.add(full)
+            links.append(full)
+    return links
+
+
+def forum_block_check(html):
+    """Anti-bot detector for forums (overrides the generic browser-fetch check).
+
+    Forums like Dread and the Reddit Tor mirror have normal pages that contain the
+    word "captcha" (login/report/registration widgets), so the generic
+    _looks_like_captcha would flag every good page and, in --manual mode, loop forever
+    asking the operator to "solve the CAPTCHA". These forums show no interstitial
+    CAPTCHA during normal browsing, so we only treat a page as blocked when it is
+    genuinely empty/stub or its <title> is itself the challenge (a real CAPTCHA/anti-DDoS
+    interstitial titles itself that way). A bad fetch is otherwise caught downstream:
+    a non-results page yields no links / no count → the term is retried next run rather
+    than mis-saved.
     """
     if not html or len(html) < 500:
         return True
@@ -336,6 +359,16 @@ def _dread_search_url(base, term, page):
     return url
 
 
+def _reddit_search_url(base, term, page):
+    # Reddit Tor mirror search: /search/?q=<term>. Reddit paginates via opaque cursor
+    # tokens, not page numbers, so &page=N is a best-effort guess — the repeat-page
+    # guard in crawl_search_term stops after page 1 if it just re-serves the same hits.
+    url = f"{base}/search/?q={urllib.parse.quote(term)}"
+    if page > 1:
+        url += f"&page={page}"
+    return url
+
+
 def _abacus_search_url(base, term, page):
     # Custom market advanced search: term goes in s_terms, all other filter params
     # kept verbatim (s_stock=1 = in-stock only). Pagination param assumed (&page=N).
@@ -356,10 +389,14 @@ def _usable_results_page(html, market=None):
     If the market defines a ``valid_page_marker`` (a substring present on every
     one of its search pages), require it. Otherwise fall back to a market-agnostic
     check: a substantial, non-CAPTCHA page.
+
+    Uses the market's ``block_check`` override when set (forums whose normal pages
+    mention "captcha") so a genuine 0-result page isn't mis-flagged as blocked.
     """
     if not html or len(html) < 1000:
         return False
-    if _looks_like_captcha(html):
+    block = getattr(market, "block_check", None) or _looks_like_captcha
+    if block(html):
         return False
     marker = getattr(market, "valid_page_marker", None)
     if marker:
@@ -505,8 +542,19 @@ FORUMS = {
         search_url=_dread_search_url,        # /search/?q=<term>&sub=DNMSourcing
         count_parser=parse_count_dread,      # <div class="searchamount"> ... N results
         link_extractor=extract_dread_post_links,  # <div class="post-title"> post links
-        block_check=dread_block_check,       # avoid false CAPTCHA loop on normal Dread pages
+        block_check=forum_block_check,       # avoid false CAPTCHA loop on normal Dread pages
         browser_products=True,  # conversation pages need the live browser session
+    ),
+    "reddit": Market(
+        key="reddit",
+        name="Reddit (Tor mirror)",
+        base="https://www.reddittorjg6rue252oqsxryoxengawnmo46qy4kyii5wtqnwfj4ooad.onion",
+        search_url=_reddit_search_url,       # /search/?q=<term>
+        count_parser=None,  # no result-count element → count = # of conversation links found
+        link_extractor=extract_reddit_post_links,  # <a data-testid="post-title"> post links
+        valid_page_marker="faceplate",  # Reddit's web-component chrome; confirms a real (0-result) page
+        block_check=forum_block_check,
+        browser_products=True,  # JS-heavy pages → fetch conversation pages via the browser
     ),
 }
 
@@ -624,17 +672,20 @@ def crawl_search_term(driver, session, market, term, args, scraped_urls, all_pro
             print(colored(f"❌ Failed to fetch search page {page} for {term!r}", "red"))
             return False  # transient → retry next run
 
-        # First page: if the market reports a result count, gate on it.
-        if page == 1 and market.count_parser is not None:
-            count = market.count_parser(html)
-            if count is None:
-                print(colored(f"   ⚠️  Could not read a result count for {term!r} — will retry next run.", "yellow"))
-                return False
-            print(colored(f"   🔢 {count} result(s) reported for {term!r}", "green", attrs=["bold"]))
+        # First page: set up the report row (forum runs) and, for markets/forums that
+        # report a result count, gate on it. Count-less forums (no count_parser) instead
+        # derive their count from the number of conversation links found (set below).
+        if page == 1:
+            if market.count_parser is not None:
+                count = market.count_parser(html)
+                if count is None:
+                    print(colored(f"   ⚠️  Could not read a result count for {term!r} — will retry next run.", "yellow"))
+                    return False
+                print(colored(f"   🔢 {count} result(s) reported for {term!r}", "green", attrs=["bold"]))
             if report is not None:
                 report_entry = {"term": term, "count": count, "conversation_urls": []}
                 report.append(report_entry)
-            if count == 0:
+            if market.count_parser is not None and count == 0:
                 print(colored("   ⏭️  0 results → nothing to crawl (done).", "yellow"))
                 return True  # genuinely no results → don't re-search
 
@@ -645,6 +696,9 @@ def crawl_search_term(driver, session, market, term, args, scraped_urls, all_pro
             for link in product_links:
                 if link not in report_entry["conversation_urls"]:
                     report_entry["conversation_urls"].append(link)
+            if market.count_parser is None:
+                # Count-less forum: the number of conversations found IS the result signal.
+                report_entry["count"] = len(report_entry["conversation_urls"])
 
         # End-of-pagination detection (mirrors scrape_simple's forward walk):
         # stop on an empty page or one that repeats the previous page's link set.
