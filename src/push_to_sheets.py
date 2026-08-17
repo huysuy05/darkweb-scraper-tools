@@ -9,8 +9,9 @@ Setup (one-time):
   2. Download its JSON key to credentials/service_account.json (gitignored).
   3. Share the target sheet with the service account's client_email (Editor).
 
-The whole sheet is rewritten in a single batched update so we stay well under
-the Sheets API rate limits.
+The whole worksheet is rewritten in a single batched update so we stay well
+under the Sheets API rate limits.  Use ``--category abortion`` with ``--llm``
+to publish only LLM-confirmed abortion-medication listings.
 """
 from __future__ import annotations
 
@@ -111,6 +112,8 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
                         help="Push the LLM-evaluated variant (filtered_medicines_llm.json) to its "
                              f"own '{LLM_WORKSHEET}' tab, leaving the keyword-only '{DEFAULT_WORKSHEET}' "
                              "tab intact for comparison.")
+    parser.add_argument("--category", choices=("abortion", "contraception"),
+                        help="With --llm, keep only LLM-approved listings in this category")
     # Defaults are resolved in main() so --llm can switch them; explicit flags win.
     parser.add_argument("--json-input", "-j", type=Path, nargs="+", default=None,
                         help="One or more filtered listings JSON files; their listings are "
@@ -134,6 +137,9 @@ def main(argv: List[str] | None = None) -> None:
     if args.worksheet is None:
         args.worksheet = LLM_WORKSHEET if args.llm else DEFAULT_WORKSHEET
 
+    if args.category and not args.llm:
+        raise SystemExit("--category requires --llm because it uses the LLM category verdict.")
+
     if not args.credentials.exists():
         raise SystemExit(
             f"Service account key not found at {args.credentials}. "
@@ -156,8 +162,12 @@ def main(argv: List[str] | None = None) -> None:
         before = len(listings)
         listings = [item for item in listings if item.get("llm_relevant") is True]
         print(f"  --llm → keeping {len(listings)} approved of {before} evaluated")
+        if args.category:
+            approved = len(listings)
+            listings = [item for item in listings if item.get("llm_category") == args.category]
+            print(f"  --category {args.category} → keeping {len(listings)} of {approved} approved")
         if not listings:
-            raise SystemExit("No LLM-approved listings to push (did you run evaluate_llm.py?).")
+            raise SystemExit("No matching LLM-approved listings to push (did you run evaluate_llm.py?).")
 
     rows = build_rows(listings)
     url = push(rows, args.credentials, args.sheet_id, args.worksheet)
